@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#102a38">
   <title>Lead Desk</title>
   <link rel="stylesheet" href="styles.css">
+  <style>[hidden]{display:none!important}</style>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="app.js" defer></script>
 </head>
@@ -17,7 +18,7 @@
   <main>
     <section class="intro"><div><p class="eyebrow">YOUR DAILY WORKSPACE</p><h1>Find the next good conversation.</h1><p class="intro-copy">A focused view of your leads, their website opportunities, and the best way to reach them.</p></div><a id="sheet-link" class="sheet-link" target="_blank" rel="noopener noreferrer">Open Google Sheet ↗</a></section>
     <section id="setup" class="setup card">
-      <div><p class="eyebrow">GET STARTED</p><h2>Connect your existing lead sheet</h2><p>Only people who already have access to the Google Sheet can see its private data here. Paste the OAuth client ID from your Google Cloud project, then sign in.</p></div>
+      <div><p class="eyebrow">GET STARTED</p><h2>Connect your existing lead sheet</h2><p>Only people who already have access to the Google Sheet can see its private data here. Your Google connection is configured; click Save & connect and sign in.</p></div>
       <form id="settings-form"><label for="client-id">Google OAuth client ID</label><div class="form-row"><input id="client-id" type="text" autocomplete="off" placeholder="123456789-...apps.googleusercontent.com"><button class="button primary" type="submit">Save & connect</button></div><p class="helper">This ID is saved only in this browser. Add your GitHub Pages domain to the OAuth client's authorized JavaScript origins.</p></form>
       <div class="import"><label for="csv-file">Preview with a CSV export instead</label><input id="csv-file" type="file" accept=".csv,text/csv"><p class="helper">CSV stays in this browser. It is not uploaded to GitHub.</p></div>
     </section>
