@@ -1,4 +1,5 @@
 const SHEET_ID = '1xBZj0GIoIcu5jwv5SQzdOynKDdO97zPi6g2oZTrqI6w';
+const DEFAULT_CLIENT_ID = '720482448772-3cb9sp3a772hbsagr91rhcq6ko5e4moi.apps.googleusercontent.com';
 const EXCLUDED_TABS = new Set(['Archive - Mixed Leads']);
 const PAGE_SIZE = 30;
 const $ = id => document.getElementById(id);
@@ -198,4 +199,4 @@ $('prev').addEventListener('click',()=>{if(state.page>0){state.page--;render()}}
 $('next').addEventListener('click',()=>{if((state.page+1)*PAGE_SIZE<state.filtered.length){state.page++;render()}});
 $('close-details').addEventListener('click',()=>$('details').close());
 $('details').addEventListener('click',event=>{if(event.target===$('details'))$('details').close()});
-$('client-id').value=localStorage.getItem('leadDeskClientId')||'';
+$('client-id').value=localStorage.getItem('leadDeskClientId')||DEFAULT_CLIENT_ID;
