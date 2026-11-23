@@ -3,9 +3,9 @@ const DEFAULT_CLIENT_ID = '720482448772-3cb9sp3a772hbsagr91rhcq6ko5e4moi.apps.go
 const EXCLUDED_TABS = new Set(['Archive - Mixed Leads']);
 const PAGE_SIZE = 30;
 const $ = id => document.getElementById(id);
-const state = { leads: [], filtered: [], page: 0, token: '', tokenClient: null, source: '' };
-const sheetUrl = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit`;
-$('detail-sheet').href = sheetUrl;
+const initialView=['new','contacted','ongoing','closed'].includes(location.hash.slice(1))?location.hash.slice(1):'new';
+const state = { leads: [], filtered: [], page: 0, token: '', tokenClient: null, source: '', activeLead: null, headersByTab: {}, view: initialView };
+const EDIT_FIELDS = ['Call Notes','Call Status','Follow-up Date & Time','Lead Stage','Deal Sealed','Client Onboarded','Deal Amount','Deal Currency','Payment Status','Amount Paid','Deal Sealed Date'];
 const text = value => String(value ?? '').trim();
 const has = value => Boolean(text(value));
 const cell = (row, name) => text(row[name]);
@@ -28,9 +28,12 @@ function contactLinks(lead) {
   const box = el('div', 'links');
   const phone = cell(lead, 'Phone Number') || cell(lead, 'Phone');
   const email = cell(lead, 'Email');
-  const social = safeUrl(cell(lead, 'Social Media Link') || cell(lead, 'Instagram Link'));
+  const handle=cell(lead,'Instagram Handle').replace(/^@/,'');
+  const social = safeUrl(cell(lead, 'Social Media Link') || cell(lead, 'Instagram Link') || (handle?`https://www.instagram.com/${handle}/`:''));
+  const whatsapp=phoneUrl(cell(lead,'WhatsApp'));
   if (phoneUrl(phone)) box.append(link('Call', phoneUrl(phone)));
   if (email && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) box.append(link('Email', `mailto:${email}`));
+  if(whatsapp)box.append(link('WhatsApp',`https://wa.me/${cell(lead,'WhatsApp').replace(/\D/g,'')}`));
   if (social) box.append(link('Social ↗', social));
   if (!box.children.length) box.append(el('span', 'sub', 'No contact method'));
   return box;
@@ -41,12 +44,39 @@ function opportunity(lead) {
   return has(cell(lead, 'Website URL')) ? 'Has website' : 'No website listed';
 }
 function status(lead) { return cell(lead, 'Call Status') || (cell(lead, 'Contacted').toLowerCase() === 'yes' ? 'Contacted' : 'Not contacted'); }
-function isContacted(lead) { const s = status(lead).toLowerCase(); return s !== 'not contacted' && s !== 'new' && s !== 'pending'; }
+function isContacted(lead) { const s = status(lead).toLowerCase(); return ['true','yes'].includes(cell(lead,'Contacted').toLowerCase()) || !['not contacted','not called','new','pending'].includes(s); }
 function isFollowupDue(lead) {
-  const date = cell(lead, 'Follow-up Date');
+  const date = cell(lead, 'Follow-up Date & Time') || cell(lead, 'Follow-up Date');
   if (!date) return false;
-  const parsed = new Date(date);
+  let parsed = new Date(date.replace(' ', 'T'));
+  if (Number.isNaN(parsed.getTime())) parsed = new Date(date);
   return !Number.isNaN(parsed.getTime()) && parsed <= new Date();
+}
+function localToday() { const d=new Date(),p=n=>String(n).padStart(2,'0');return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}`; }
+function dateTimeInput(value) {
+  if (!value) return '';
+  let parsed = new Date(value.replace(' ', 'T'));
+  if (Number.isNaN(parsed.getTime())) parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return '';
+  const pad = n => String(n).padStart(2,'0');
+  return `${parsed.getFullYear()}-${pad(parsed.getMonth()+1)}-${pad(parsed.getDate())}T${pad(parsed.getHours())}:${pad(parsed.getMinutes())}`;
+}
+function stage(lead) { return cell(lead,'Lead Stage') || 'New'; }
+function payment(lead) { return cell(lead,'Payment Status') || 'Unpaid'; }
+function isSealed(lead) { return cell(lead,'Deal Sealed') === 'Yes' || ['Deal Sealed','Client Onboarded'].includes(stage(lead)); }
+function leadView(lead) {
+  if(isSealed(lead)||cell(lead,'Client Onboarded')==='Yes')return 'closed';
+  if(['Interested','Proposal Sent','Negotiating'].includes(stage(lead)))return 'ongoing';
+  if(isContacted(lead)||stage(lead)!=='New')return 'contacted';
+  return 'new';
+}
+const NEAR_KANDIVALI=['Kandivali','Borivali','Malad','Goregaon','Mira Road','Bhayandar','Andheri','Vile Parle','Santacruz','Powai','Bandra','Ghatkopar','Mulund','Bhandup','Vikhroli','Thane','Kurla','Dadar','Matunga','Sion','Lower Parel','Worli','Byculla','Grant Road','Charni Road','Girgaon','Marine Lines','Fort','Colaba','Navi Mumbai','Vashi','Nerul','Kharghar','Panvel'];
+function proximity(lead) {
+  const area=(cell(lead,'Area')||cell(lead,'City')).toLowerCase();
+  const index=NEAR_KANDIVALI.findIndex(x=>area.includes(x.toLowerCase()));
+  if(index>=0)return index;
+  if(cell(lead,'City').toLowerCase()==='mumbai')return 100;
+  return 200;
 }
 function score(lead) {
   const p = cell(lead, 'Call Priority').toLowerCase();
@@ -71,11 +101,15 @@ function updateTabs() {
   $('tab-filter').replaceChildren(new Option('All tabs', ''), ...names.map(x => new Option(x, x)));
 }
 function renderStats() {
+  for(const view of ['new','contacted','ongoing','closed'])$('count-'+view).textContent=state.leads.filter(x=>leadView(x)===view).length.toLocaleString();
+  for(const button of document.querySelectorAll('.view-tabs button'))button.classList.toggle('active',button.dataset.view===state.view);
   const items = [
     ['Total leads', state.leads.length, 'Across all active tabs'],
     ['To contact', state.leads.filter(x => !isContacted(x)).length, 'No call outcome recorded'],
     ['Follow-ups due', state.leads.filter(isFollowupDue).length, 'Today or earlier'],
-    ['With phone', state.leads.filter(x => has(cell(x, 'Phone Number') || cell(x, 'Phone'))).length, 'Ready to call']
+    ['With phone', state.leads.filter(x => has(cell(x, 'Phone Number') || cell(x, 'Phone'))).length, 'Ready to call'],
+    ['Deals sealed', state.leads.filter(isSealed).length, 'Marked as won'],
+    ['Clients onboarded', state.leads.filter(x => cell(x,'Client Onboarded') === 'Yes' || stage(x) === 'Client Onboarded').length, 'Active clients']
   ];
   $('stats').replaceChildren(...items.map(([label, count, hint]) => {
     const node = el('div', 'stat'); node.append(el('span', '', label), el('strong', '', count.toLocaleString()), el('small', '', hint)); return node;
@@ -84,7 +118,9 @@ function renderStats() {
 function applyFilters() {
   const query = $('search').value.toLowerCase().trim();
   const tab = $('tab-filter').value, contact = $('contact-filter').value, filterStatus = $('status-filter').value;
+  const stageFilter = $('stage-filter').value, paymentFilter = $('payment-filter').value;
   state.filtered = state.leads.filter(lead => {
+    if(leadView(lead)!==state.view)return false;
     if (tab && lead._tab !== tab) return false;
     if (query && !['Business Name','City','Area','Profession','Business Type','Email','Phone Number','Instagram Handle'].some(k => cell(lead,k).toLowerCase().includes(query))) return false;
     if (contact === 'phone' && !has(cell(lead, 'Phone Number') || cell(lead, 'Phone'))) return false;
@@ -93,12 +129,16 @@ function applyFilters() {
     if (filterStatus === 'pending' && isContacted(lead)) return false;
     if (filterStatus === 'contacted' && !isContacted(lead)) return false;
     if (filterStatus === 'followup' && !isFollowupDue(lead)) return false;
+    if (stageFilter && stage(lead) !== stageFilter) return false;
+    if (paymentFilter && payment(lead) !== paymentFilter) return false;
     return true;
-  }).sort((a,b) => score(a)-score(b) || cell(a,'Business Name').localeCompare(cell(b,'Business Name')));
+  }).sort((a,b) => proximity(a)-proximity(b) || score(a)-score(b) || cell(a,'Business Name').localeCompare(cell(b,'Business Name')));
   state.page = 0; render();
 }
 function render() {
   renderStats();
+  $('view-title').firstChild.textContent={new:'New leads ',contacted:'Contacted leads ',ongoing:'Deals ongoing ',closed:'Clients closed '}[state.view];
+  $('loaded-count').textContent=`${state.leads.length.toLocaleString()} total leads loaded from ${Object.keys(state.headersByTab).length||1} Sheet tab(s).`;
   const start = state.page * PAGE_SIZE;
   const page = state.filtered.slice(start, start + PAGE_SIZE);
   $('result-count').textContent = `(${state.filtered.length.toLocaleString()})`;
@@ -109,49 +149,188 @@ function render() {
   const rows = page.map(lead => {
     const tr = document.createElement('tr');
     const name = el('td'); name.append(el('span','business',cell(lead,'Business Name') || 'Unnamed business'),el('span','sub',[cell(lead,'Area') || cell(lead,'City'),cell(lead,'Profession') || cell(lead,'Business Type'),lead._tab].filter(Boolean).join(' · ')));
+    const website=el('td');const url=safeUrl(cell(lead,'Website URL'));if(url)website.append(link('Visit website ↗',url));else website.append(el('span','sub','No website listed'));
     const issue = el('td'); issue.append(el('span','pill warm',opportunity(lead)));
     const contact = el('td'); contact.append(contactLinks(lead));
-    const call = el('td'); call.append(el('span',isContacted(lead)?'pill good':'pill',status(lead)));
-    const priority = el('td'); priority.append(el('span','pill',cell(lead,'Call Priority') || '—'));
+    const call = el('td'); call.append(el('span',isSealed(lead)?'pill good':'pill',stage(lead)));
+    const priority = el('td'); priority.append(el('span',isFollowupDue(lead)?'pill warm':'sub',cell(lead,'Follow-up Date & Time')||cell(lead,'Follow-up Date')||'—'));
+    const pay = el('td'); pay.append(el('span',payment(lead)==='Full Paid'?'pill good':'pill',payment(lead)));
     const action = el('td'); const button = el('button','text-button','View details'); button.type='button'; button.addEventListener('click',()=>showDetails(lead)); action.append(button);
-    tr.append(name,issue,contact,call,priority,action); return tr;
+    tr.append(name,website,issue,contact,call,priority,pay,action); return tr;
   });
   $('lead-rows').replaceChildren(...rows);
 }
 function detailSection(title, value) { const section=el('section','detail-section');section.append(el('h3','',title),el('div','detail-value',value || 'Not provided'));return section; }
+function field(name, label, type='text', options=[]) {
+  const wrapper=el('label','form-field');
+  wrapper.append(el('span','',label));
+  let control;
+  if(type==='select'){
+    control=el('select');
+    const current=cell(state.activeLead,name);
+    const choices=current && !options.includes(current) ? [current,...options] : options;
+    control.replaceChildren(...choices.map(x=>new Option(x,x)));
+  }else if(type==='textarea'){
+    control=el('textarea');control.rows=5;
+  }else{
+    control=el('input');control.type=type;
+    if(type==='number'){control.min='0';control.step='0.01'}
+  }
+  control.name=name;
+  const value=cell(state.activeLead,name);
+  control.value=type==='datetime-local'?dateTimeInput(value):type==='number'?value.replaceAll(',',''):value || (name==='Lead Stage'?'New':name==='Payment Status'?'Unpaid':name==='Deal Currency'?cell(state.activeLead,'City').toLowerCase()==='london'?'GBP':cell(state.activeLead,'City').toLowerCase()==='new york'?'USD':'INR':name==='Deal Sealed'||name==='Client Onboarded'?'No':'');
+  wrapper.append(control);
+  return wrapper;
+}
+function formBlock(title, fields) { const section=el('section','detail-section');section.append(el('h3','',title));const grid=el('div','form-grid');grid.append(...fields);section.append(grid);return section; }
 function showDetails(lead) {
-  $('detail-sheet').href=lead._gid !== undefined ? `${sheetUrl}#gid=${lead._gid}&range=A${lead._row}` : sheetUrl;
+  state.activeLead=lead;
+  $('save-message').textContent=state.source==='Google Sheets'?'':'CSV preview is read-only. Connect Google to save.';
+  $('save-lead').disabled=state.source!=='Google Sheets';
   $('detail-name').textContent=cell(lead,'Business Name') || 'Unnamed business';
   $('detail-meta').textContent=[cell(lead,'City'),cell(lead,'Area'),cell(lead,'Profession')||cell(lead,'Business Type'),lead._tab].filter(Boolean).join(' · ');
   const body=el('div','detail-content');
   const grid=el('div','detail-grid detail-section');
-  for(const [label,value] of [['Website problem',opportunity(lead)],['Call status',status(lead)],['Follow-up date',cell(lead,'Follow-up Date')||'Not set'],['Last contacted',cell(lead,'Last Contacted')||'Not set']]){const d=el('div');d.append(el('span','',label),el('strong','',value));grid.append(d)}
+  for(const [label,value] of [['Website problem',opportunity(lead)],['Call priority',cell(lead,'Call Priority')||'—'],['Last contacted',cell(lead,'Last Contacted')||'Not set'],['Current stage',stage(lead)],['Owner',cell(lead,'Owner Name')||'Not listed'],['Phone',cell(lead,'Phone Number')||'Not listed'],['Email',cell(lead,'Email')||'Not listed'],['Address',cell(lead,'Address')||'Not listed']]){const d=el('div');d.append(el('span','',label),el('strong','',value));grid.append(d)}
   body.append(grid);
   const contacts=el('section','detail-section');contacts.append(el('h3','','Contact options'),contactLinks(lead));body.append(contacts);
+  const form=el('form','lead-form');form.id='lead-form';form.addEventListener('submit',event=>event.preventDefault());
+  form.append(formBlock('Call and follow-up',[
+    field('Call Status','Call status','select',['Not called','Called','No answer','Follow-up','Interested','Not interested','Closed']),
+    field('Follow-up Date & Time','Follow-up date and time','datetime-local'),
+    field('Call Notes','Notes','textarea')
+  ]));
+  form.append(formBlock('Deal progress',[
+    field('Lead Stage','Lead stage','select',['New','Contacted','Interested','Proposal Sent','Negotiating','Deal Sealed','Client Onboarded','Lost']),
+    field('Deal Sealed','Deal sealed','select',['No','Yes']),
+    field('Client Onboarded','Client onboarded','select',['No','Yes']),
+    field('Deal Sealed Date','Deal sealed date','date')
+  ]));
+  form.append(formBlock('Payment',[
+    field('Deal Amount','Deal amount','number'),
+    field('Deal Currency','Currency','select',['INR','USD','GBP','EUR','Other']),
+    field('Payment Status','Payment status','select',['Unpaid','Half Paid','Full Paid']),
+    field('Amount Paid','Amount paid','number')
+  ]));
+  body.append(form);
   body.append(detailSection('Cold call script',cell(lead,'Cold Call Script')));
-  body.append(detailSection('Call notes',cell(lead,'Call Notes')));
   const urls=el('section','detail-section');urls.append(el('h3','','Research links'));
-  const links=el('div','links');for(const [label,field] of [['Website','Website URL'],['Google Maps','Google Maps URL']]){const url=safeUrl(cell(lead,field));if(url)links.append(link(label+' ↗',url))}urls.append(links.children.length?links:el('div','detail-value','No links provided'));body.append(urls);
+  const links=el('div','links');for(const [label,field] of [['Website','Website URL'],['Google Maps','Google Maps URL'],['Social media','Social Media Link'],['Instagram','Instagram Link']]){const url=safeUrl(cell(lead,field));if(url)links.append(link(label+' ↗',url))}urls.append(links.children.length?links:el('div','detail-value','No links provided'));body.append(urls);
   $('detail-body').replaceChildren(body);
+  form.elements.namedItem('Call Status').addEventListener('change',event=>{
+    const currentStage=form.elements.namedItem('Lead Stage');
+    if(currentStage.value!=='New')return;
+    if(event.target.value==='Interested')currentStage.value='Interested';
+    else if(event.target.value==='Not interested')currentStage.value='Lost';
+    else if(event.target.value!=='Not called')currentStage.value='Contacted';
+  });
+  form.elements.namedItem('Lead Stage').addEventListener('change',event=>{
+    if(['Deal Sealed','Client Onboarded'].includes(event.target.value)){
+      form.elements.namedItem('Deal Sealed').value='Yes';
+      if(!form.elements.namedItem('Deal Sealed Date').value)form.elements.namedItem('Deal Sealed Date').value=localToday();
+    }
+    if(event.target.value==='Client Onboarded')form.elements.namedItem('Client Onboarded').value='Yes';
+  });
+  form.elements.namedItem('Deal Sealed').addEventListener('change',event=>{
+    if(event.target.value==='Yes'){
+      const currentStage=form.elements.namedItem('Lead Stage');
+      if(currentStage.value!=='Client Onboarded')currentStage.value='Deal Sealed';
+      if(!form.elements.namedItem('Deal Sealed Date').value)form.elements.namedItem('Deal Sealed Date').value=localToday();
+    }
+  });
+  form.elements.namedItem('Client Onboarded').addEventListener('change',event=>{
+    if(event.target.value==='Yes'){
+      form.elements.namedItem('Deal Sealed').value='Yes';
+      form.elements.namedItem('Lead Stage').value='Client Onboarded';
+      if(!form.elements.namedItem('Deal Sealed Date').value)form.elements.namedItem('Deal Sealed Date').value=localToday();
+    }
+  });
+  form.elements.namedItem('Payment Status').addEventListener('change',event=>{
+    const amount=Number(form.elements.namedItem('Deal Amount').value);
+    if(amount>0&&event.target.value==='Full Paid')form.elements.namedItem('Amount Paid').value=amount.toFixed(2);
+    if(amount>0&&event.target.value==='Half Paid')form.elements.namedItem('Amount Paid').value=(amount/2).toFixed(2);
+    if(event.target.value==='Unpaid')form.elements.namedItem('Amount Paid').value='0';
+  });
   $('details').showModal();
 }
 async function api(path) {
-  const response=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}${path}`,{headers:{Authorization:`Bearer ${state.token}`}});
+  return apiRequest(path);
+}
+async function apiRequest(path, options={}) {
+  const response=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}${path}`,{...options,headers:{Authorization:`Bearer ${state.token}`,'Content-Type':'application/json',...options.headers}});
   if(!response.ok){let detail='';try{detail=(await response.json()).error?.message||''}catch{}throw new Error(`${response.status}: ${detail||response.statusText}`)}
   return response.json();
+}
+function columnLetter(index) { let n=index+1,s='';while(n){n--;s=String.fromCharCode(65+n%26)+s;n=Math.floor(n/26)}return s; }
+function quotedTab(name) { return `'${name.replaceAll("'","''")}'`; }
+function sameLead(a,b) {
+  const id=cell(a,'Google Place ID');
+  if(id) return id===cell(b,'Google Place ID');
+  return cell(a,'Business Name')===cell(b,'Business Name') && cell(a,'Phone Number')===cell(b,'Phone Number') && cell(a,'City')===cell(b,'City') && cell(a,'Address')===cell(b,'Address');
+}
+async function saveLead() {
+  const lead=state.activeLead, form=$('lead-form'), button=$('save-lead');
+  if(state.source!=='Google Sheets'||!lead||!form)return;
+  const valueFor=name=>{
+    const control=form.elements.namedItem(name);
+    return name==='Follow-up Date & Time'?control.value.replace('T',' '):control.value.trim();
+  };
+  const changes=EDIT_FIELDS.filter(name=>{
+    const old=name==='Follow-up Date & Time'?dateTimeInput(cell(lead,name)).replace('T',' '):cell(lead,name).replaceAll(',','');
+    return valueFor(name)!==old;
+  }).map(name=>[name,valueFor(name)]);
+  if(!changes.length){$('save-message').textContent='No changes to save.';return}
+  const amount=Number(valueFor('Deal Amount')), paid=Number(valueFor('Amount Paid'));
+  if((valueFor('Deal Amount')&&(!Number.isFinite(amount)||amount<0))||(valueFor('Amount Paid')&&(!Number.isFinite(paid)||paid<0))){$('save-message').textContent='Amounts must be zero or greater.';return}
+  if(valueFor('Deal Amount')&&valueFor('Amount Paid')&&paid>amount){$('save-message').textContent='Amount paid cannot exceed deal amount.';return}
+  button.disabled=true;$('save-message').textContent='Saving…';
+  try{
+    const tab=quotedTab(lead._tab);
+    const lastCol=lead._tab==='International'?'AB':'AF';
+    const current=await api(`/values/${encodeURIComponent(`${tab}!A1:${lastCol}`)}?valueRenderOption=FORMATTED_VALUE`);
+    const rows=current.values||[],headers=(rows[0]||[]).map(text);
+    const matches=[];
+    for(let i=1;i<rows.length;i++){const candidate={};headers.forEach((h,j)=>{if(h)candidate[h]=text(rows[i][j])});if(sameLead(lead,candidate))matches.push({row:i+1,values:rows[i]})}
+    if(matches.length!==1)throw new Error('This lead moved or is duplicated. Refresh the page before saving.');
+    const match=matches[0], updates=[];
+    for(const [name,value] of changes){
+      const index=headers.indexOf(name);if(index<0)throw new Error(`Missing Sheet column: ${name}`);
+      if(text(match.values[index])!==cell(lead,name))throw new Error(`${name} was changed by someone else. Refresh before saving.`);
+      updates.push({range:`${tab}!${columnLetter(index)}${match.row}`,values:[[value]]});
+    }
+    if(changes.some(([name])=>name==='Call Status')){
+      const called=!['Not called','Not contacted','New','Pending'].includes(valueFor('Call Status'));
+      for(const [name,value] of [['Contacted',called],['Last Contacted',called?localToday():'']]){
+        const index=headers.indexOf(name);if(index>=0)updates.push({range:`${tab}!${columnLetter(index)}${match.row}`,values:[[value]]});
+      }
+    }
+    const notes=updates.filter(x=>x.range===`${tab}!${columnLetter(headers.indexOf('Call Notes'))}${match.row}`);
+    const other=updates.filter(x=>!notes.includes(x));
+    if(other.length)await apiRequest('/values:batchUpdate',{method:'POST',body:JSON.stringify({valueInputOption:'USER_ENTERED',data:other})});
+    if(notes.length)await apiRequest('/values:batchUpdate',{method:'POST',body:JSON.stringify({valueInputOption:'RAW',data:notes})});
+    for(const [name,value] of changes)lead[name]=value;
+    if(changes.some(([name])=>name==='Call Status')){lead.Contacted=!['Not called','Not contacted','New','Pending'].includes(valueFor('Call Status'))?'TRUE':'FALSE';lead['Last Contacted']=localToday()}
+    lead._row=match.row;
+    $('details').close();
+    setNotice(`Saved ${cell(lead,'Business Name')} to Google Sheets. It is now in ${leadView(lead)}.`);
+    applyFilters();
+  }catch(error){$('save-message').textContent=`Save failed: ${error.message}`}
+  finally{button.disabled=false}
 }
 async function loadSheets() {
   setNotice(''); $('sync-label').textContent='Loading Google Sheet…';
   try {
     const meta=await api('?fields=sheets(properties(title,hidden,sheetId))');
     const tabs=meta.sheets.map(x=>x.properties).filter(x=>!x.hidden&&!EXCLUDED_TABS.has(x.title));
-    const ranges=tabs.map(x=>`ranges=${encodeURIComponent(`'${x.title.replaceAll("'","''")}'!A:W`)}`).join('&');
+    const ranges=tabs.map(x=>`ranges=${encodeURIComponent(`'${x.title.replaceAll("'","''")}'!A1:${x.title==='International'?'AB':'AF'}`)}`).join('&');
     const data=await api(`/values:batchGet?${ranges}&valueRenderOption=FORMATTED_VALUE`);
-    state.leads=[];
+    if((data.valueRanges||[]).length!==tabs.length)throw new Error('Some Sheet tabs did not load. Try Refresh.');
+    state.leads=[];state.headersByTab={};
     for(let i=0;i<tabs.length;i++){
       const values=data.valueRanges[i]?.values||[];
       if(!values.length)continue;
       const headers=values[0].map(text);
+      state.headersByTab[tabs[i].title]=headers;
       for(let j=1;j<values.length;j++){
         const row=values[j];if(!row.some(has))continue;
         const lead={_tab:tabs[i].title,_gid:tabs[i].sheetId,_row:j+1};headers.forEach((h,k)=>{if(h)lead[h]=text(row[k])});
@@ -159,16 +338,18 @@ async function loadSheets() {
       }
     }
     showDashboard('Google Sheets');
-  }catch(error){ $('sync-label').textContent='Sync failed';setNotice(`Could not read the Sheet: ${error.message}. Check that this Google account can open it and the Sheets API is enabled.`);$('setup').hidden=false;$('dashboard').hidden=false; }
+  }catch(error){ if(String(error.message).startsWith('401:')){state.token='';sessionStorage.removeItem('leadDeskSession')} $('sync-label').textContent='Sync failed';setNotice(`Could not read the Sheet: ${error.message}. Check that this Google account can open it and the Sheets API is enabled.`);$('setup').hidden=false;$('dashboard').hidden=false; }
 }
 function connect() {
   const clientId=$('client-id').value.trim();
   if(!clientId){setNotice('Enter a Google OAuth client ID first.');$('setup').hidden=false;return}
   if(!window.google?.accounts?.oauth2){setNotice('Google sign-in has not loaded. Check your connection and try again.');$('setup').hidden=false;return}
   localStorage.setItem('leadDeskClientId',clientId);
-  state.tokenClient=google.accounts.oauth2.initTokenClient({client_id:clientId,scope:'https://www.googleapis.com/auth/spreadsheets.readonly',callback:response=>{
+  state.tokenClient=google.accounts.oauth2.initTokenClient({client_id:clientId,scope:'https://www.googleapis.com/auth/spreadsheets',callback:response=>{
     if(response.error){setNotice(`Google sign-in failed: ${response.error}`);return}
-    state.token=response.access_token;loadSheets();
+    state.token=response.access_token;
+    sessionStorage.setItem('leadDeskSession',JSON.stringify({token:state.token,expiresAt:Date.now()+Math.max(0,Number(response.expires_in||3600)-60)*1000}));
+    loadSheets();
   }});
   state.tokenClient.requestAccessToken({prompt:state.token?'':'consent'});
 }
@@ -193,9 +374,13 @@ $('csv-file').addEventListener('change',async event=>{
   state.leads=rows.filter(row=>row.some(has)).map(row=>{const lead={_tab:file.name.replace(/\.csv$/i,'')};headers.forEach((h,i)=>{if(h)lead[h]=text(row[i])});return lead}).filter(x=>has(cell(x,'Business Name')));
   showDashboard('CSV');setNotice('CSV preview is local to this browser. Changes made in Google Sheets will appear after connecting Google.');
 });
-for(const id of ['search','tab-filter','contact-filter','status-filter'])$(id).addEventListener(id==='search'?'input':'change',applyFilters);
+for(const id of ['search','tab-filter','contact-filter','status-filter','stage-filter','payment-filter'])$(id).addEventListener(id==='search'?'input':'change',applyFilters);
+$('dashboard').querySelectorAll('.view-tabs button').forEach(button=>button.addEventListener('click',()=>{location.hash=button.dataset.view}));
+window.addEventListener('hashchange',()=>{const view=location.hash.slice(1);if(['new','contacted','ongoing','closed'].includes(view)){state.view=view;applyFilters()}});
+$('save-lead').addEventListener('click',saveLead);
 $('prev').addEventListener('click',()=>{if(state.page>0){state.page--;render()}});
 $('next').addEventListener('click',()=>{if((state.page+1)*PAGE_SIZE<state.filtered.length){state.page++;render()}});
 $('close-details').addEventListener('click',()=>$('details').close());
 $('details').addEventListener('click',event=>{if(event.target===$('details'))$('details').close()});
 $('client-id').value=localStorage.getItem('leadDeskClientId')||DEFAULT_CLIENT_ID;
+try{const saved=JSON.parse(sessionStorage.getItem('leadDeskSession')||'null');if(saved?.token&&saved.expiresAt>Date.now()){state.token=saved.token;loadSheets()}}catch{sessionStorage.removeItem('leadDeskSession')}
