@@ -5,7 +5,6 @@ const PAGE_SIZE = 30;
 const $ = id => document.getElementById(id);
 const state = { leads: [], filtered: [], page: 0, token: '', tokenClient: null, source: '' };
 const sheetUrl = `https://docs.google.com/spreadsheets/d/${SHEET_ID}/edit`;
-$('sheet-link').href = sheetUrl;
 $('detail-sheet').href = sheetUrl;
 const text = value => String(value ?? '').trim();
 const has = value => Boolean(text(value));
