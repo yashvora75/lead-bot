@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102a38">
+  <title>Lead Desk</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">↗</span><div><strong>Lead Desk</strong><small>Website outreach workspace</small></div></div>
+    <div class="top-actions"><span id="sync-label">Connect your Google Sheet</span><button id="refresh" class="button subtle" hidden>Refresh</button><button id="connect" class="button primary">Connect Google</button></div>
+  </header>
+  <main>
+    <section class="intro"><div><p class="eyebrow">YOUR DAILY WORKSPACE</p><h1>Find the next good conversation.</h1><p class="intro-copy">A focused view of your leads, their website opportunities, and the best way to reach them.</p></div><a id="sheet-link" class="sheet-link" target="_blank" rel="noopener noreferrer">Open Google Sheet ↗</a></section>
+    <section id="setup" class="setup card">
+      <div><p class="eyebrow">GET STARTED</p><h2>Connect your existing lead sheet</h2><p>Only people who already have access to the Google Sheet can see its private data here. Paste the OAuth client ID from your Google Cloud project, then sign in.</p></div>
+      <form id="settings-form"><label for="client-id">Google OAuth client ID</label><div class="form-row"><input id="client-id" type="text" autocomplete="off" placeholder="123456789-...apps.googleusercontent.com"><button class="button primary" type="submit">Save & connect</button></div><p class="helper">This ID is saved only in this browser. Add your GitHub Pages domain to the OAuth client's authorized JavaScript origins.</p></form>
+      <div class="import"><label for="csv-file">Preview with a CSV export instead</label><input id="csv-file" type="file" accept=".csv,text/csv"><p class="helper">CSV stays in this browser. It is not uploaded to GitHub.</p></div>
+    </section>
+    <section id="dashboard" hidden>
+      <div class="stats" id="stats"></div>
+      <div class="workspace card">
+        <div class="workspace-head"><div><p class="eyebrow">LEAD QUEUE</p><h2>All leads <span id="result-count"></span></h2></div><div class="tools"><input id="search" type="search" placeholder="Search business, city, email…" aria-label="Search leads"><select id="tab-filter" aria-label="Sheet tab"><option value="">All tabs</option></select><select id="contact-filter" aria-label="Contact method"><option value="">Any contact</option><option value="phone">Has phone</option><option value="email">Has email</option><option value="social">Has social</option></select><select id="status-filter" aria-label="Call status"><option value="">Any status</option><option value="pending">Not contacted</option><option value="followup">Follow-up due</option><option value="contacted">Contacted</option></select></div></div>
+        <div id="notice" class="notice" hidden></div>
+        <div class="table-wrap"><table><thead><tr><th>Business</th><th>Opportunity</th><th>Contact</th><th>Call status</th><th>Priority</th><th></th></tr></thead><tbody id="lead-rows"></tbody></table></div>
+        <div id="empty" class="empty" hidden>No leads match these filters.</div>
+        <div class="pagination"><span id="page-info"></span><div><button id="prev" class="button subtle">Previous</button><button id="next" class="button subtle">Next</button></div></div>
+      </div>
+    </section>
+  </main>
+  <dialog id="details"><div class="dialog-head"><div><p class="eyebrow">LEAD DETAILS</p><h2 id="detail-name"></h2><p id="detail-meta"></p></div><button id="close-details" class="icon-button" aria-label="Close details">×</button></div><div id="detail-body"></div><div class="dialog-foot"><a id="detail-sheet" class="button primary" target="_blank" rel="noopener noreferrer">Update in Google Sheet ↗</a></div></dialog>
+</body>
+</html>
