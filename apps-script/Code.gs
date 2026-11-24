@@ -28,8 +28,8 @@ function doPost(e) {
   try { result = saveLead_(JSON.parse(e.parameter.payload || '{}')); }
   catch (err) { result = {ok:false,error:String(err.message || err)}; }
   // The browser submits a normal HTML form into a hidden iframe, avoiding a CORS preflight.
-  const message = JSON.stringify({type:'lead-desk-save',result}).replace(/</g,'\\u003c');
-  return HtmlService.createHtmlOutput('<!doctype html><script>parent.postMessage(' + message + ',"https://yashvora75.github.io")<\/script>');
+  const message = JSON.stringify({type:'lead-desk-save',requestId:String(e.parameter.requestId || ''),result}).replace(/</g,'\\u003c');
+  return HtmlService.createHtmlOutput('<!doctype html><script>top.postMessage(' + message + ',"https://yashvora75.github.io")<\/script>');
 }
 
 function saveLead_(request) {

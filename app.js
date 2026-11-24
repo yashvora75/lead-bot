@@ -340,13 +340,13 @@ function publicRead() {
 }
 function publicWrite(payload) {
   return new Promise((resolve,reject)=>{
-    const frame=document.createElement('iframe'),form=document.createElement('form'),input=document.createElement('input');
+    const frame=document.createElement('iframe'),form=document.createElement('form'),input=document.createElement('input'),requestId=document.createElement('input');
     const id='leadDeskPost'+Math.random().toString(36).slice(2);
     frame.name=id;frame.hidden=true;form.hidden=true;form.method='POST';form.action=PUBLIC_API_URL;form.target=id;
-    input.name='payload';input.value=JSON.stringify(payload);form.append(input);document.body.append(frame,form);
+    input.name='payload';input.value=JSON.stringify(payload);requestId.name='requestId';requestId.value=id;form.append(input,requestId);document.body.append(frame,form);
     const timer=setTimeout(()=>finish(new Error('Save timed out. Refresh to check whether it was saved.')),30000);
     function finish(error,value){clearTimeout(timer);window.removeEventListener('message',onMessage);frame.remove();form.remove();error?reject(error):resolve(value)}
-    function onMessage(event){if(event.source!==frame.contentWindow||event.data?.type!=='lead-desk-save')return;const result=event.data.result;result?.ok?finish(null,result):finish(new Error(result?.error||'Save failed'))}
+    function onMessage(event){if(!/^https:\/\/([a-z0-9-]+\.)*(googleusercontent\.com|google\.com)$/.test(event.origin)||event.data?.type!=='lead-desk-save'||event.data.requestId!==id)return;const result=event.data.result;result?.ok?finish(null,result):finish(new Error(result?.error||'Save failed'))}
     window.addEventListener('message',onMessage);form.submit();
   });
 }
