@@ -6,10 +6,10 @@
   <meta name="theme-color" content="#102a38">
   <title>Lead Desk</title>
   <link rel="stylesheet" href="styles.css">
-  <link rel="stylesheet" href="deal.css?v=3">
+  <link rel="stylesheet" href="deal.css?v=4">
   <style>[hidden]{display:none!important}</style>
   <script src="https://accounts.google.com/gsi/client" async defer></script>
-  <script src="app.js?v=3" defer></script>
+  <script src="app.js?v=4" defer></script>
 </head>
 <body>
   <header class="topbar">
@@ -25,16 +25,18 @@
     </section>
     <section id="dashboard" hidden>
       <div class="stats" id="stats"></div>
-      <nav class="view-tabs" aria-label="Lead workflow"><button type="button" data-view="new" class="active">New <span id="count-new">0</span></button><button type="button" data-view="contacted">Contacted <span id="count-contacted">0</span></button><button type="button" data-view="ongoing">Deals ongoing <span id="count-ongoing">0</span></button><button type="button" data-view="closed">Clients closed <span id="count-closed">0</span></button></nav>
-      <div class="workspace card">
+      <nav class="view-tabs" aria-label="Lead workflow"><button type="button" data-view="new" class="active">New <span id="count-new">0</span></button><button type="button" data-view="contacted">Contacted <span id="count-contacted">0</span></button><button type="button" data-view="ongoing">Deals ongoing <span id="count-ongoing">0</span></button><button type="button" data-view="closed">Clients closed <span id="count-closed">0</span></button><button type="button" data-view="logs">Activity logs <span id="count-logs">0</span></button></nav>
+      <div id="lead-workspace" class="workspace card">
         <div class="workspace-head"><div><p class="eyebrow">LEAD QUEUE · NEAREST TO KANDIVALI FIRST</p><h2 id="view-title">New leads <span id="result-count"></span></h2><p id="loaded-count" class="helper"></p></div><div class="tools"><input id="search" type="search" placeholder="Search business, city, email…" aria-label="Search leads"><select id="tab-filter" aria-label="Sheet tab"><option value="">All tabs</option></select><select id="contact-filter" aria-label="Contact method"><option value="">Any contact</option><option value="phone">Has phone</option><option value="email">Has email</option><option value="social">Has social</option></select><select id="status-filter" aria-label="Call status"><option value="">Any status</option><option value="pending">Not contacted</option><option value="followup">Follow-up due</option><option value="contacted">Contacted</option></select><select id="stage-filter" aria-label="Lead stage"><option value="">Any stage</option><option>New</option><option>Contacted</option><option>Interested</option><option>Proposal Sent</option><option>Negotiating</option><option>Deal Sealed</option><option>Client Onboarded</option><option>Lost</option></select><select id="payment-filter" aria-label="Payment status"><option value="">Any payment</option><option>Unpaid</option><option>Half Paid</option><option>Full Paid</option></select></div></div>
         <div id="notice" class="notice" hidden></div>
         <div class="table-wrap"><table><thead><tr><th>Business</th><th>Website link</th><th>Opportunity</th><th>Contact</th><th>Lead stage</th><th>Follow-up</th><th>Payment</th></tr></thead><tbody id="lead-rows"></tbody></table></div>
         <div id="empty" class="empty" hidden>No leads match these filters.</div>
         <div class="pagination"><span id="page-info"></span><div><button id="prev" class="button subtle">Previous</button><button id="next" class="button subtle">Next</button></div></div>
       </div>
+      <div id="log-view" class="workspace card" hidden><div class="workspace-head"><div><p class="eyebrow">TEAM ACTIVITY</p><h2>CRM change log</h2><p class="helper">Changes saved through Lead Desk by each signed-in user.</p><p id="log-user-counts" class="helper"></p></div><div class="tools"><select id="log-user-filter" aria-label="Filter log by user"><option value="">Both users</option><option value="yashvora75@gmail.com">Yash</option><option value="priyamvadasingh.work@gmail.com">Priyamvada</option></select><input id="log-search" type="search" placeholder="Search business or field…" aria-label="Search activity log"></div></div><div class="table-wrap"><table class="log-table"><thead><tr><th>When</th><th>User</th><th>Business</th><th>Sheet tab</th><th>Changed fields</th><th></th></tr></thead><tbody id="log-rows"></tbody></table></div><div id="log-empty" class="empty" hidden>No CRM changes recorded for this filter yet.</div><div class="pagination"><span id="log-page-info"></span><div><button id="log-prev" class="button subtle" type="button">Previous</button><button id="log-next" class="button subtle" type="button">Next</button></div></div></div>
     </section>
   </main>
   <dialog id="details"><div class="dialog-head"><div><p class="eyebrow">LEAD DETAILS</p><h2 id="detail-name"></h2><p id="detail-meta"></p></div><button id="close-details" class="icon-button" aria-label="Close details">×</button></div><div id="detail-body"></div><div class="dialog-foot"><span id="save-message" role="status"></span><button id="save-lead" class="button primary" type="button">Save changes</button></div></dialog>
+  <dialog id="log-details"><div class="dialog-head"><div><p class="eyebrow">ACTIVITY DETAILS</p><h2 id="log-detail-title"></h2><p id="log-detail-meta"></p></div><button id="close-log-details" class="icon-button" aria-label="Close activity details">×</button></div><div id="log-detail-body" class="detail-content"></div></dialog>
 </body>
 </html>

@@ -1,10 +1,13 @@
 const SHEET_ID = '1xBZj0GIoIcu5jwv5SQzdOynKDdO97zPi6g2oZTrqI6w';
 const DEFAULT_CLIENT_ID = '720482448772-3cb9sp3a772hbsagr91rhcq6ko5e4moi.apps.googleusercontent.com';
-const EXCLUDED_TABS = new Set(['Archive - Mixed Leads']);
+const EXCLUDED_TABS = new Set(['Archive - Mixed Leads','Activity Log']);
+const LOG_TAB = 'Activity Log';
+const LOG_HEADERS = ['Timestamp','User Email','User ID','Action','Business Name','Lead Tab','Google Place ID','Changed Fields','Before','After'];
 const PAGE_SIZE = 30;
 const $ = id => document.getElementById(id);
-const initialView=['new','contacted','ongoing','closed'].includes(location.hash.slice(1))?location.hash.slice(1):'new';
-const state = { leads: [], filtered: [], page: 0, token: '', tokenClient: null, source: '', activeLead: null, headersByTab: {}, view: initialView };
+const VIEWS=['new','contacted','ongoing','closed','logs'];
+const initialView=VIEWS.includes(location.hash.slice(1))?location.hash.slice(1):'new';
+const state = { leads: [], filtered: [], page: 0, token: '', tokenClient: null, source: '', activeLead: null, headersByTab: {}, view: initialView, user: null, logs: [], logSheetId: null, logPage: 0 };
 const EDIT_FIELDS = ['Call Notes','Call Status','Follow-up Date & Time','Lead Stage','Deal Sealed','Client Onboarded','Deal Amount','Deal Currency','Payment Status','Amount Paid','Deal Sealed Date'];
 const text = value => String(value ?? '').trim();
 const has = value => Boolean(text(value));
@@ -91,9 +94,9 @@ function setNotice(message) { $('notice').textContent = message; $('notice').hid
 function showDashboard(source) {
   state.source = source;
   $('setup').hidden = true; $('dashboard').hidden = false;
-  $('sync-label').textContent = source === 'Google Sheets' ? 'Connected to Google Sheets' : 'Local CSV preview';
+  $('sync-label').textContent = source === 'Google Sheets' ? `Signed in: ${state.user?.email||'Google user'}` : 'Local CSV preview';
   $('refresh').hidden = source !== 'Google Sheets';
-  $('connect').textContent = source === 'Google Sheets' ? 'Reconnect' : 'Connect Google';
+  $('connect').textContent = source === 'Google Sheets' ? 'Switch account' : 'Connect Google';
   updateTabs(); applyFilters();
 }
 function updateTabs() {
@@ -102,6 +105,7 @@ function updateTabs() {
 }
 function renderStats() {
   for(const view of ['new','contacted','ongoing','closed'])$('count-'+view).textContent=state.leads.filter(x=>leadView(x)===view).length.toLocaleString();
+  $('count-logs').textContent=state.logs.length.toLocaleString();
   for(const button of document.querySelectorAll('.view-tabs button'))button.classList.toggle('active',button.dataset.view===state.view);
   const items = [
     ['Total leads', state.leads.length, 'Across all active tabs'],
@@ -116,6 +120,7 @@ function renderStats() {
   }));
 }
 function applyFilters() {
+  if(state.view==='logs'){state.logPage=0;render();return}
   const query = $('search').value.toLowerCase().trim();
   const tab = $('tab-filter').value, contact = $('contact-filter').value, filterStatus = $('status-filter').value;
   const stageFilter = $('stage-filter').value, paymentFilter = $('payment-filter').value;
@@ -137,6 +142,9 @@ function applyFilters() {
 }
 function render() {
   renderStats();
+  $('lead-workspace').hidden=state.view==='logs';
+  $('log-view').hidden=state.view!=='logs';
+  if(state.view==='logs'){renderLogs();return}
   $('view-title').firstChild.textContent={new:'New leads ',contacted:'Contacted leads ',ongoing:'Deals ongoing ',closed:'Clients closed '}[state.view];
   $('loaded-count').textContent=`${state.leads.length.toLocaleString()} total leads loaded from ${Object.keys(state.headersByTab).length||1} Sheet tab(s).`;
   const start = state.page * PAGE_SIZE;
@@ -158,6 +166,35 @@ function render() {
     tr.append(name,website,issue,contact,call,priority,pay); return tr;
   });
   $('lead-rows').replaceChildren(...rows);
+}
+function displayTime(value) { const d=new Date(value);return Number.isNaN(d.getTime())?value:d.toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}); }
+function actorName(email) { return email==='yashvora75@gmail.com'?'Yash':email==='priyamvadasingh.work@gmail.com'?'Priyamvada':email||'Unknown user'; }
+function renderLogs() {
+  $('log-user-counts').textContent=`Yash: ${state.logs.filter(x=>cell(x,'User Email')==='yashvora75@gmail.com').length} changes · Priyamvada: ${state.logs.filter(x=>cell(x,'User Email')==='priyamvadasingh.work@gmail.com').length} changes`;
+  const user=$('log-user-filter').value,query=$('log-search').value.toLowerCase().trim();
+  const rows=state.logs.filter(log=>(!user||cell(log,'User Email')===user)&&(!query||[cell(log,'Business Name'),cell(log,'Changed Fields'),cell(log,'User Email')].some(x=>x.toLowerCase().includes(query)))).sort((a,b)=>cell(b,'Timestamp').localeCompare(cell(a,'Timestamp')));
+  const start=state.logPage*PAGE_SIZE,page=rows.slice(start,start+PAGE_SIZE);
+  $('log-empty').hidden=rows.length!==0;
+  $('log-page-info').textContent=rows.length?`${start+1}–${Math.min(start+PAGE_SIZE,rows.length)} of ${rows.length} events`:'0 events';
+  $('log-prev').disabled=state.logPage===0;$('log-next').disabled=start+PAGE_SIZE>=rows.length;
+  $('log-rows').replaceChildren(...page.map(log=>{
+    const tr=el('tr'),when=el('td','',displayTime(cell(log,'Timestamp'))),userCell=el('td'),business=el('td','business',cell(log,'Business Name')||'—'),tab=el('td','',cell(log,'Lead Tab')||'—'),fields=el('td','',cell(log,'Changed Fields')||cell(log,'Action'));
+    userCell.append(el('span','log-user',actorName(cell(log,'User Email'))),el('span','sub',cell(log,'User Email')));
+    const action=el('td'),button=el('button','text-button','See changes');button.type='button';button.addEventListener('click',()=>showLogDetails(log));action.append(button);
+    tr.append(when,userCell,business,tab,fields,action);return tr;
+  }));
+}
+function showLogDetails(log) {
+  $('log-detail-title').textContent=cell(log,'Business Name')||cell(log,'Action')||'Activity';
+  $('log-detail-meta').textContent=`${actorName(cell(log,'User Email'))} · ${displayTime(cell(log,'Timestamp'))} · ${cell(log,'Lead Tab')}`;
+  let before={},after={};try{before=JSON.parse(cell(log,'Before')||'{}')}catch{}try{after=JSON.parse(cell(log,'After')||'{}')}catch{}
+  const body=$('log-detail-body');body.replaceChildren();
+  for(const name of Object.keys(after)){
+    const section=el('div','log-diff');section.append(el('span','',name));
+    section.append(el('pre','',`Before: ${text(before[name])||'—'}\nAfter: ${text(after[name])||'—'}`));body.append(section);
+  }
+  if(!body.children.length)body.append(el('p','',cell(log,'Changed Fields')||'No field details recorded.'));
+  $('log-details').showModal();
 }
 function detailSection(title, value) { const section=el('section','detail-section');section.append(el('h3','',title),el('div','detail-value',value || 'Not provided'));return section; }
 function field(name, label, type='text', options=[]) {
@@ -260,12 +297,32 @@ async function apiRequest(path, options={}) {
   if(!response.ok){let detail='';try{detail=(await response.json()).error?.message||''}catch{}throw new Error(`${response.status}: ${detail||response.statusText}`)}
   return response.json();
 }
+async function signedInUser() {
+  const response=await fetch('https://openidconnect.googleapis.com/v1/userinfo',{headers:{Authorization:`Bearer ${state.token}`}});
+  if(!response.ok)throw new Error('Google identity permission is missing. Click Reconnect and approve email access.');
+  const user=await response.json();
+  if(!user.email||!user.email_verified)throw new Error('A verified Google email is required for activity logs.');
+  return user;
+}
 function columnLetter(index) { let n=index+1,s='';while(n){n--;s=String.fromCharCode(65+n%26)+s;n=Math.floor(n/26)}return s; }
 function quotedTab(name) { return `'${name.replaceAll("'","''")}'`; }
 function sameLead(a,b) {
   const id=cell(a,'Google Place ID');
   if(id) return id===cell(b,'Google Place ID');
   return cell(a,'Business Name')===cell(b,'Business Name') && cell(a,'Phone Number')===cell(b,'Phone Number') && cell(a,'City')===cell(b,'City') && cell(a,'Address')===cell(b,'Address');
+}
+function sheetDateSerial(value,withTime) {
+  const match=withTime?/^(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(value):/^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
+  if(!match)return null;
+  const [,year,month,day,hour='0',minute='0']=match;
+  return (Date.UTC(+year,+month-1,+day,+hour,+minute)-Date.UTC(1899,11,30))/86400000;
+}
+function sheetCell(name,value) {
+  if(value===''||value===null)return {};
+  if(name==='Contacted')return {userEnteredValue:{boolValue:Boolean(value)}};
+  if(['Deal Amount','Amount Paid'].includes(name))return {userEnteredValue:{numberValue:Number(value)}};
+  const serial=name==='Follow-up Date & Time'?sheetDateSerial(value,true):name==='Deal Sealed Date'?sheetDateSerial(value,false):null;
+  return {userEnteredValue:serial===null?{stringValue:String(value)}:{numberValue:serial}};
 }
 async function saveLead() {
   const lead=state.activeLead, form=$('lead-form'), button=$('save-lead');
@@ -284,6 +341,7 @@ async function saveLead() {
   if(valueFor('Deal Amount')&&valueFor('Amount Paid')&&paid>amount){$('save-message').textContent='Amount paid cannot exceed deal amount.';return}
   button.disabled=true;$('save-message').textContent='Saving…';
   try{
+    if(!state.user?.email||!state.user?.email_verified||state.logSheetId===null)throw new Error('Your Google identity or Activity Log is unavailable. Reconnect and try again.');
     const tab=quotedTab(lead._tab);
     const lastCol=lead._tab==='International'?'AB':'AF';
     const current=await api(`/values/${encodeURIComponent(`${tab}!A1:${lastCol}`)}?valueRenderOption=FORMATTED_VALUE`);
@@ -291,24 +349,25 @@ async function saveLead() {
     const matches=[];
     for(let i=1;i<rows.length;i++){const candidate={};headers.forEach((h,j)=>{if(h)candidate[h]=text(rows[i][j])});if(sameLead(lead,candidate))matches.push({row:i+1,values:rows[i]})}
     if(matches.length!==1)throw new Error('This lead moved or is duplicated. Refresh the page before saving.');
-    const match=matches[0], updates=[];
+    const match=matches[0], updates=[],before={},after={};
     for(const [name,value] of changes){
       const index=headers.indexOf(name);if(index<0)throw new Error(`Missing Sheet column: ${name}`);
       if(text(match.values[index])!==cell(lead,name))throw new Error(`${name} was changed by someone else. Refresh before saving.`);
-      updates.push({range:`${tab}!${columnLetter(index)}${match.row}`,values:[[value]]});
+      before[name]=text(match.values[index]);after[name]=value;
+      updates.push({updateCells:{start:{sheetId:lead._gid,rowIndex:match.row-1,columnIndex:index},rows:[{values:[sheetCell(name,value)]}],fields:'userEnteredValue'}});
     }
     if(changes.some(([name])=>name==='Call Status')){
       const called=!['Not called','Not contacted','New','Pending'].includes(valueFor('Call Status'));
       for(const [name,value] of [['Contacted',called],['Last Contacted',called?localToday():'']]){
-        const index=headers.indexOf(name);if(index>=0)updates.push({range:`${tab}!${columnLetter(index)}${match.row}`,values:[[value]]});
+        const index=headers.indexOf(name);if(index>=0){before[name]=text(match.values[index]);after[name]=String(value);updates.push({updateCells:{start:{sheetId:lead._gid,rowIndex:match.row-1,columnIndex:index},rows:[{values:[sheetCell(name,value)]}],fields:'userEnteredValue'}})}
       }
     }
-    const notes=updates.filter(x=>x.range===`${tab}!${columnLetter(headers.indexOf('Call Notes'))}${match.row}`);
-    const other=updates.filter(x=>!notes.includes(x));
-    if(other.length)await apiRequest('/values:batchUpdate',{method:'POST',body:JSON.stringify({valueInputOption:'USER_ENTERED',data:other})});
-    if(notes.length)await apiRequest('/values:batchUpdate',{method:'POST',body:JSON.stringify({valueInputOption:'RAW',data:notes})});
+    const log={Timestamp:new Date().toISOString(),'User Email':state.user.email,'User ID':state.user.sub||'',Action:'Updated lead','Business Name':cell(lead,'Business Name'),'Lead Tab':lead._tab,'Google Place ID':cell(lead,'Google Place ID'),'Changed Fields':Object.keys(after).join(', '),Before:JSON.stringify(before),After:JSON.stringify(after)};
+    updates.push({appendCells:{sheetId:state.logSheetId,rows:[{values:LOG_HEADERS.map(name=>sheetCell(name,log[name]))}],fields:'userEnteredValue'}});
+    await apiRequest(':batchUpdate',{method:'POST',body:JSON.stringify({requests:updates})});
+    state.logs.unshift(log);
     for(const [name,value] of changes)lead[name]=value;
-    if(changes.some(([name])=>name==='Call Status')){lead.Contacted=!['Not called','Not contacted','New','Pending'].includes(valueFor('Call Status'))?'TRUE':'FALSE';lead['Last Contacted']=localToday()}
+    if(changes.some(([name])=>name==='Call Status')){const called=!['Not called','Not contacted','New','Pending'].includes(valueFor('Call Status'));lead.Contacted=called?'TRUE':'FALSE';lead['Last Contacted']=called?localToday():''}
     lead._row=match.row;
     $('details').close();
     setNotice(`Saved ${cell(lead,'Business Name')} to Google Sheets. It is now in ${leadView(lead)}.`);
@@ -319,7 +378,11 @@ async function saveLead() {
 async function loadSheets() {
   setNotice(''); $('sync-label').textContent='Loading Google Sheet…';
   try {
+    state.user=await signedInUser();
     const meta=await api('?fields=sheets(properties(title,hidden,sheetId))');
+    const logTab=meta.sheets.map(x=>x.properties).find(x=>x.title===LOG_TAB);
+    if(!logTab)throw new Error('Activity Log tab is missing from the Sheet.');
+    state.logSheetId=logTab.sheetId;
     const tabs=meta.sheets.map(x=>x.properties).filter(x=>!x.hidden&&!EXCLUDED_TABS.has(x.title));
     const ranges=tabs.map(x=>`ranges=${encodeURIComponent(`'${x.title.replaceAll("'","''")}'!A1:${x.title==='International'?'AB':'AF'}`)}`).join('&');
     const data=await api(`/values:batchGet?${ranges}&valueRenderOption=FORMATTED_VALUE`);
@@ -336,21 +399,26 @@ async function loadSheets() {
         if(has(cell(lead,'Business Name')))state.leads.push(lead);
       }
     }
+    const logData=await api(`/values/${encodeURIComponent("'Activity Log'!A1:J")}?valueRenderOption=FORMATTED_VALUE`);
+    const logRows=logData.values||[],logHeaders=(logRows[0]||[]).map(text);
+    if(LOG_HEADERS.some((name,i)=>logHeaders[i]!==name))throw new Error('Activity Log headers changed.');
+    state.logs=logRows.slice(1).filter(row=>row.some(has)).map(row=>Object.fromEntries(logHeaders.map((name,i)=>[name,text(row[i])])));
     showDashboard('Google Sheets');
-  }catch(error){ if(String(error.message).startsWith('401:')){state.token='';sessionStorage.removeItem('leadDeskSession')} $('sync-label').textContent='Sync failed';setNotice(`Could not read the Sheet: ${error.message}. Check that this Google account can open it and the Sheets API is enabled.`);$('setup').hidden=false;$('dashboard').hidden=false; }
+  }catch(error){ if(String(error.message).startsWith('401:')||String(error.message).includes('identity permission')||String(error.message).includes('verified Google email')){state.token='';sessionStorage.removeItem('leadDeskSession')} $('sync-label').textContent='Sync failed';setNotice(`Could not read the Sheet: ${error.message}. Check that this Google account can open it and the Sheets API is enabled.`);$('setup').hidden=false;$('dashboard').hidden=false; }
 }
 function connect() {
   const clientId=$('client-id').value.trim();
   if(!clientId){setNotice('Enter a Google OAuth client ID first.');$('setup').hidden=false;return}
   if(!window.google?.accounts?.oauth2){setNotice('Google sign-in has not loaded. Check your connection and try again.');$('setup').hidden=false;return}
   localStorage.setItem('leadDeskClientId',clientId);
-  state.tokenClient=google.accounts.oauth2.initTokenClient({client_id:clientId,scope:'https://www.googleapis.com/auth/spreadsheets',callback:response=>{
+  state.token='';state.user=null;sessionStorage.removeItem('leadDeskSession');$('sync-label').textContent='Choose your Google account';
+  state.tokenClient=google.accounts.oauth2.initTokenClient({client_id:clientId,scope:'openid email https://www.googleapis.com/auth/spreadsheets',callback:response=>{
     if(response.error){setNotice(`Google sign-in failed: ${response.error}`);return}
     state.token=response.access_token;
     sessionStorage.setItem('leadDeskSession',JSON.stringify({token:state.token,expiresAt:Date.now()+Math.max(0,Number(response.expires_in||3600)-60)*1000}));
     loadSheets();
   }});
-  state.tokenClient.requestAccessToken({prompt:state.token?'':'consent'});
+  state.tokenClient.requestAccessToken({prompt:'select_account'});
 }
 function parseCsv(input) {
   const rows=[];let row=[],value='',quoted=false;
@@ -371,11 +439,18 @@ $('csv-file').addEventListener('change',async event=>{
   const file=event.target.files?.[0];if(!file)return;
   const rows=parseCsv((await file.text()).replace(/^\uFEFF/,''));const headers=(rows.shift()||[]).map(text);
   state.leads=rows.filter(row=>row.some(has)).map(row=>{const lead={_tab:file.name.replace(/\.csv$/i,'')};headers.forEach((h,i)=>{if(h)lead[h]=text(row[i])});return lead}).filter(x=>has(cell(x,'Business Name')));
+  state.logs=[];state.user=null;
   showDashboard('CSV');setNotice('CSV preview is local to this browser. Changes made in Google Sheets will appear after connecting Google.');
 });
 for(const id of ['search','tab-filter','contact-filter','status-filter','stage-filter','payment-filter'])$(id).addEventListener(id==='search'?'input':'change',applyFilters);
 $('dashboard').querySelectorAll('.view-tabs button').forEach(button=>button.addEventListener('click',()=>{location.hash=button.dataset.view}));
-window.addEventListener('hashchange',()=>{const view=location.hash.slice(1);if(['new','contacted','ongoing','closed'].includes(view)){state.view=view;applyFilters()}});
+window.addEventListener('hashchange',()=>{const view=location.hash.slice(1);if(VIEWS.includes(view)){state.view=view;applyFilters()}});
+$('log-user-filter').addEventListener('change',()=>{state.logPage=0;renderLogs()});
+$('log-search').addEventListener('input',()=>{state.logPage=0;renderLogs()});
+$('log-prev').addEventListener('click',()=>{if(state.logPage>0){state.logPage--;renderLogs()}});
+$('log-next').addEventListener('click',()=>{state.logPage++;renderLogs()});
+$('close-log-details').addEventListener('click',()=>$('log-details').close());
+$('log-details').addEventListener('click',event=>{if(event.target===$('log-details'))$('log-details').close()});
 $('save-lead').addEventListener('click',saveLead);
 $('prev').addEventListener('click',()=>{if(state.page>0){state.page--;render()}});
 $('next').addEventListener('click',()=>{if((state.page+1)*PAGE_SIZE<state.filtered.length){state.page++;render()}});
