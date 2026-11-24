@@ -344,10 +344,29 @@ function publicWrite(payload) {
     const id='leadDeskPost'+Math.random().toString(36).slice(2);
     frame.name=id;frame.hidden=true;form.hidden=true;form.method='POST';form.action=PUBLIC_API_URL;form.target=id;
     input.name='payload';input.value=JSON.stringify(payload);requestId.name='requestId';requestId.value=id;form.append(input,requestId);document.body.append(frame,form);
-    const timer=setTimeout(()=>finish(new Error('Save timed out. Refresh to check whether it was saved.')),30000);
+    const priorLogCount=state.logs.length;
+    let submitted=false,checking=false,done=false;
+    const timer=setTimeout(()=>finish(new Error('Save could not be confirmed. Refresh to check the Sheet.')),70000);
     function finish(error,value){clearTimeout(timer);window.removeEventListener('message',onMessage);frame.remove();form.remove();error?reject(error):resolve(value)}
-    function onMessage(event){if(!/^https:\/\/([a-z0-9-]+\.)*(googleusercontent\.com|google\.com)$/.test(event.origin)||event.data?.type!=='lead-desk-save'||event.data.requestId!==id)return;const result=event.data.result;result?.ok?finish(null,result):finish(new Error(result?.error||'Save failed'))}
-    window.addEventListener('message',onMessage);form.submit();
+    function onMessage(event){if(done||!/^https:\/\/([a-z0-9-]+\.)*(googleusercontent\.com|google\.com)$/.test(event.origin)||event.data?.type!=='lead-desk-save'||event.data.requestId!==id)return;done=true;const result=event.data.result;result?.ok?finish(null,result):finish(new Error(result?.error||'Save failed'))}
+    async function verify(){
+      if(!submitted||checking||done)return;
+      checking=true;
+      for(let attempt=0;attempt<2&&!done;attempt++){
+        try {
+          const data=await publicRead();
+          const headers=(data.logs?.[0]||[]).map(text),afterIndex=headers.indexOf('After'),nameIndex=headers.indexOf('Business Name'),actorIndex=headers.indexOf('User Email');
+          const match=(data.logs||[]).slice(priorLogCount+1).some(row=>{
+            if(row[nameIndex]!==payload.business||row[actorIndex]!==payload.actor)return false;
+            try {const after=JSON.parse(row[afterIndex]);return Object.entries(payload.changes).every(([name,value])=>after[name]===String(value))} catch{return false}
+          });
+          if(match){done=true;finish(null,{ok:true});return}
+        } catch(error){if(attempt===1){done=true;finish(error);return}}
+      }
+      if(!done){done=true;finish(new Error('The Sheet did not confirm this save. Refresh before trying again.'))}
+    }
+    frame.addEventListener('load',verify);
+    window.addEventListener('message',onMessage);submitted=true;form.submit();
   });
 }
 async function saveLeadPublic(lead,changes) {
