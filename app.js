@@ -148,15 +148,14 @@ function render() {
   $('next').disabled = start + PAGE_SIZE >= state.filtered.length;
   const rows = page.map(lead => {
     const tr = document.createElement('tr');
-    const name = el('td'); name.append(el('span','business',cell(lead,'Business Name') || 'Unnamed business'),el('span','sub',[cell(lead,'Area') || cell(lead,'City'),cell(lead,'Profession') || cell(lead,'Business Type'),lead._tab].filter(Boolean).join(' · ')));
-    const website=el('td');const url=safeUrl(cell(lead,'Website URL'));if(url)website.append(link('Visit website ↗',url));else website.append(el('span','sub','No website listed'));
+    const name = el('td'); const nameButton=el('button','business-link',cell(lead,'Business Name') || 'Unnamed business');nameButton.type='button';nameButton.title='Open lead details and notes';nameButton.addEventListener('click',()=>showDetails(lead));name.append(nameButton,el('span','sub',[cell(lead,'Area') || cell(lead,'City'),cell(lead,'Profession') || cell(lead,'Business Type'),lead._tab].filter(Boolean).join(' · ')));
+    const website=el('td');const url=safeUrl(cell(lead,'Website URL'));if(url){const a=link(new URL(url).hostname.replace(/^www\./,'')+' ↗',url);a.className='website-link';a.title=url;website.append(a)}else website.append(el('span','sub','No website listed'));
     const issue = el('td'); issue.append(el('span','pill warm',opportunity(lead)));
     const contact = el('td'); contact.append(contactLinks(lead));
     const call = el('td'); call.append(el('span',isSealed(lead)?'pill good':'pill',stage(lead)));
     const priority = el('td'); priority.append(el('span',isFollowupDue(lead)?'pill warm':'sub',cell(lead,'Follow-up Date & Time')||cell(lead,'Follow-up Date')||'—'));
     const pay = el('td'); pay.append(el('span',payment(lead)==='Full Paid'?'pill good':'pill',payment(lead)));
-    const action = el('td'); const button = el('button','text-button','View details'); button.type='button'; button.addEventListener('click',()=>showDetails(lead)); action.append(button);
-    tr.append(name,website,issue,contact,call,priority,pay,action); return tr;
+    tr.append(name,website,issue,contact,call,priority,pay); return tr;
   });
   $('lead-rows').replaceChildren(...rows);
 }
