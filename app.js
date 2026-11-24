@@ -1,5 +1,6 @@
 const SHEET_ID = '1xBZj0GIoIcu5jwv5SQzdOynKDdO97zPi6g2oZTrqI6w';
 const DEFAULT_CLIENT_ID = '720482448772-3cb9sp3a772hbsagr91rhcq6ko5e4moi.apps.googleusercontent.com';
+const PUBLIC_API_URL = window.LEAD_DESK_PUBLIC_API_URL || '';
 const EXCLUDED_TABS = new Set(['Archive - Mixed Leads','Activity Log']);
 const LOG_TAB = 'Activity Log';
 const LOG_HEADERS = ['Timestamp','User Email','User ID','Action','Business Name','Lead Tab','Google Place ID','Changed Fields','Before','After'];
@@ -94,8 +95,9 @@ function setNotice(message) { $('notice').textContent = message; $('notice').hid
 function showDashboard(source) {
   state.source = source;
   $('setup').hidden = true; $('dashboard').hidden = false;
-  $('sync-label').textContent = source === 'Google Sheets' ? `Signed in: ${state.user?.email||'Google user'}` : 'Local CSV preview';
+  $('sync-label').textContent = source === 'Google Sheets' ? (PUBLIC_API_URL ? 'Live Google Sheet' : `Signed in: ${state.user?.email||'Google user'}`) : 'Local CSV preview';
   $('refresh').hidden = source !== 'Google Sheets';
+  $('connect').hidden=Boolean(PUBLIC_API_URL);
   $('connect').textContent = source === 'Google Sheets' ? 'Switch account' : 'Connect Google';
   updateTabs(); applyFilters();
 }
@@ -168,11 +170,11 @@ function render() {
   $('lead-rows').replaceChildren(...rows);
 }
 function displayTime(value) { const d=new Date(value);return Number.isNaN(d.getTime())?value:d.toLocaleString('en-IN',{dateStyle:'medium',timeStyle:'short'}); }
-function actorName(email) { return email==='yashvora75@gmail.com'?'Yash':email==='priyamvadasingh.work@gmail.com'?'Priyamvada':email||'Unknown user'; }
+function actorName(email) { return email==='yashvora75@gmail.com'||email==='Yash'?'Yash':email==='priyamvadasingh.work@gmail.com'||email==='Priyamvada'?'Priyamvada':email||'Unknown user'; }
 function renderLogs() {
-  $('log-user-counts').textContent=`Yash: ${state.logs.filter(x=>cell(x,'User Email')==='yashvora75@gmail.com').length} changes · Priyamvada: ${state.logs.filter(x=>cell(x,'User Email')==='priyamvadasingh.work@gmail.com').length} changes`;
+  $('log-user-counts').textContent=`Yash: ${state.logs.filter(x=>actorName(cell(x,'User Email'))==='Yash').length} changes · Priyamvada: ${state.logs.filter(x=>actorName(cell(x,'User Email'))==='Priyamvada').length} changes`;
   const user=$('log-user-filter').value,query=$('log-search').value.toLowerCase().trim();
-  const rows=state.logs.filter(log=>(!user||cell(log,'User Email')===user)&&(!query||[cell(log,'Business Name'),cell(log,'Changed Fields'),cell(log,'User Email')].some(x=>x.toLowerCase().includes(query)))).sort((a,b)=>cell(b,'Timestamp').localeCompare(cell(a,'Timestamp')));
+  const rows=state.logs.filter(log=>(!user||actorName(cell(log,'User Email'))===user)&&(!query||[cell(log,'Business Name'),cell(log,'Changed Fields'),cell(log,'User Email')].some(x=>x.toLowerCase().includes(query)))).sort((a,b)=>cell(b,'Timestamp').localeCompare(cell(a,'Timestamp')));
   const start=state.logPage*PAGE_SIZE,page=rows.slice(start,start+PAGE_SIZE);
   $('log-empty').hidden=rows.length!==0;
   $('log-page-info').textContent=rows.length?`${start+1}–${Math.min(start+PAGE_SIZE,rows.length)} of ${rows.length} events`:'0 events';
@@ -221,7 +223,7 @@ function field(name, label, type='text', options=[]) {
 function formBlock(title, fields) { const section=el('section','detail-section');section.append(el('h3','',title));const grid=el('div','form-grid');grid.append(...fields);section.append(grid);return section; }
 function showDetails(lead) {
   state.activeLead=lead;
-  $('save-message').textContent=state.source==='Google Sheets'?'':'CSV preview is read-only. Connect Google to save.';
+  $('save-message').textContent=state.source==='Google Sheets'?'':'CSV preview is read-only.';
   $('save-lead').disabled=state.source!=='Google Sheets';
   $('detail-name').textContent=cell(lead,'Business Name') || 'Unnamed business';
   $('detail-meta').textContent=[cell(lead,'City'),cell(lead,'Area'),cell(lead,'Profession')||cell(lead,'Business Type'),lead._tab].filter(Boolean).join(' · ');
@@ -324,6 +326,41 @@ function sheetCell(name,value) {
   const serial=name==='Follow-up Date & Time'?sheetDateSerial(value,true):name==='Deal Sealed Date'?sheetDateSerial(value,false):null;
   return {userEnteredValue:serial===null?{stringValue:String(value)}:{numberValue:serial}};
 }
+function publicRead() {
+  return new Promise((resolve,reject)=>{
+    const name='leadDeskCallback'+Math.random().toString(36).slice(2);
+    const script=document.createElement('script');
+    const timer=setTimeout(()=>finish(new Error('The Sheet did not respond. Try Refresh.')),30000);
+    function finish(error,value){clearTimeout(timer);delete window[name];script.remove();error?reject(error):resolve(value)}
+    window[name]=value=>finish(null,value);
+    script.onerror=()=>finish(new Error('Could not reach the Sheet service.'));
+    script.src=`${PUBLIC_API_URL}?callback=${name}&t=${Date.now()}`;
+    document.head.append(script);
+  });
+}
+function publicWrite(payload) {
+  return new Promise((resolve,reject)=>{
+    const frame=document.createElement('iframe'),form=document.createElement('form'),input=document.createElement('input');
+    const id='leadDeskPost'+Math.random().toString(36).slice(2);
+    frame.name=id;frame.hidden=true;form.hidden=true;form.method='POST';form.action=PUBLIC_API_URL;form.target=id;
+    input.name='payload';input.value=JSON.stringify(payload);form.append(input);document.body.append(frame,form);
+    const timer=setTimeout(()=>finish(new Error('Save timed out. Refresh to check whether it was saved.')),30000);
+    function finish(error,value){clearTimeout(timer);window.removeEventListener('message',onMessage);frame.remove();form.remove();error?reject(error):resolve(value)}
+    function onMessage(event){if(event.source!==frame.contentWindow||event.data?.type!=='lead-desk-save')return;const result=event.data.result;result?.ok?finish(null,result):finish(new Error(result?.error||'Save failed'))}
+    window.addEventListener('message',onMessage);form.submit();
+  });
+}
+async function saveLeadPublic(lead,changes) {
+  const actor=$('caller').value;
+  if(!actor)throw new Error('Choose your name at the top before saving.');
+  const before=Object.fromEntries(changes.map(([name])=>[name,cell(lead,name)]));
+  const result=await publicWrite({actor,tab:lead._tab,placeId:cell(lead,'Google Place ID'),business:cell(lead,'Business Name'),phone:cell(lead,'Phone Number'),address:cell(lead,'Address'),before,changes:Object.fromEntries(changes)});
+  for(const [name,value] of changes)lead[name]=value;
+  if(result.after?.Contacted)lead.Contacted=result.after.Contacted==='true'?'TRUE':'FALSE';
+  if(result.after?.['Last Contacted'])lead['Last Contacted']=result.after['Last Contacted'];
+  $('details').close();setNotice(`Saved ${cell(lead,'Business Name')} to Google Sheets.`);applyFilters();
+  loadPublic();
+}
 async function saveLead() {
   const lead=state.activeLead, form=$('lead-form'), button=$('save-lead');
   if(state.source!=='Google Sheets'||!lead||!form)return;
@@ -341,6 +378,7 @@ async function saveLead() {
   if(valueFor('Deal Amount')&&valueFor('Amount Paid')&&paid>amount){$('save-message').textContent='Amount paid cannot exceed deal amount.';return}
   button.disabled=true;$('save-message').textContent='Saving…';
   try{
+    if(PUBLIC_API_URL){await saveLeadPublic(lead,changes);return}
     if(!state.user?.email||!state.user?.email_verified||state.logSheetId===null)throw new Error('Your Google identity or Activity Log is unavailable. Reconnect and try again.');
     const tab=quotedTab(lead._tab);
     const lastCol=lead._tab==='International'?'AB':'AF';
@@ -374,6 +412,20 @@ async function saveLead() {
     applyFilters();
   }catch(error){$('save-message').textContent=`Save failed: ${error.message}`}
   finally{button.disabled=false}
+}
+async function loadPublic() {
+  setNotice('');$('sync-label').textContent='Loading live leads…';
+  try {
+    const data=await publicRead();if(!data?.ok)throw new Error(data?.error||'The Sheet did not respond');
+    state.leads=[];state.headersByTab={};
+    for(const tab of data.tabs||[]){
+      const values=tab.values||[],headers=(values[0]||[]).map(text);state.headersByTab[tab.title]=headers;
+      for(let j=1;j<values.length;j++){const row=values[j];if(!row.some(has))continue;const lead={_tab:tab.title,_gid:tab.sheetId,_row:j+1};headers.forEach((h,k)=>{if(h)lead[h]=text(row[k])});if(has(cell(lead,'Business Name')))state.leads.push(lead)}
+    }
+    const logRows=data.logs||[],logHeaders=(logRows[0]||[]).map(text);
+    state.logs=logRows.slice(1).filter(row=>row.some(has)).map(row=>Object.fromEntries(logHeaders.map((name,i)=>[name,text(row[i])])));
+    showDashboard('Google Sheets');
+  }catch(error){$('sync-label').textContent='Sync failed';$('setup').hidden=false;setNotice(`Could not load the Sheet: ${error.message}`)}
 }
 async function loadSheets() {
   setNotice(''); $('sync-label').textContent='Loading Google Sheet…';
@@ -434,7 +486,9 @@ function parseCsv(input) {
 }
 $('settings-form').addEventListener('submit',event=>{event.preventDefault();connect()});
 $('connect').addEventListener('click',connect);
-$('refresh').addEventListener('click',()=>state.token?loadSheets():connect());
+$('refresh').addEventListener('click',()=>PUBLIC_API_URL?loadPublic():state.token?loadSheets():connect());
+$('caller').value=localStorage.getItem('leadDeskCaller')||'';
+$('caller').addEventListener('change',()=>localStorage.setItem('leadDeskCaller',$('caller').value));
 $('csv-file').addEventListener('change',async event=>{
   const file=event.target.files?.[0];if(!file)return;
   const rows=parseCsv((await file.text()).replace(/^\uFEFF/,''));const headers=(rows.shift()||[]).map(text);
@@ -457,4 +511,5 @@ $('next').addEventListener('click',()=>{if((state.page+1)*PAGE_SIZE<state.filter
 $('close-details').addEventListener('click',()=>$('details').close());
 $('details').addEventListener('click',event=>{if(event.target===$('details'))$('details').close()});
 $('client-id').value=localStorage.getItem('leadDeskClientId')||DEFAULT_CLIENT_ID;
-try{const saved=JSON.parse(sessionStorage.getItem('leadDeskSession')||'null');if(saved?.token&&saved.expiresAt>Date.now()){state.token=saved.token;loadSheets()}}catch{sessionStorage.removeItem('leadDeskSession')}
+if(PUBLIC_API_URL){$('settings-form').hidden=true;$('setup').querySelector('.import').hidden=true;loadPublic()}
+else try{const saved=JSON.parse(sessionStorage.getItem('leadDeskSession')||'null');if(saved?.token&&saved.expiresAt>Date.now()){state.token=saved.token;loadSheets()}}catch{sessionStorage.removeItem('leadDeskSession')}
